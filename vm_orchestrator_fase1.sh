@@ -14,7 +14,7 @@ HEADNODE_IP="10.0.10.4"    # Server 1 - HeadNode
 WORKER1_IP="10.0.10.1"     # Server 2 - Worker1  
 WORKER2_IP="10.0.10.2"     # Server 3 - Worker2
 WORKER3_IP="10.0.10.3"     # Server 4 - Worker3
-OFS_IP="10.0.0.5"         # OFS - OpenFlow Switch
+OFS_IP="10.0.10.5"         # OFS - OpenFlow Switch
 
 # Configuración de bridges
 OVS_WORKER="br-int"
