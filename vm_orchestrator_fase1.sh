@@ -24,12 +24,24 @@ OVS_OFS="br-data"
 # Estas son las interfaces de Data Network
 DATA_INTERFACES=("eth1" "eth2" "eth3" "eth4")
 
-# Configuración de VMs de ejemplo
+# CONFIGURACIÓN CORREGIDA DE VMs - SEGÚN EL DIAGRAMA
+# Formato: "worker vlan vnc_port"
 declare -A VM_CONFIG
-VM_CONFIG["vm1"]="worker1 100 5901"  # worker vlan vnc_port
-VM_CONFIG["vm2"]="worker2 100 5902"
-VM_CONFIG["vm3"]="worker1 200 5903"
-VM_CONFIG["vm4"]="worker3 200 5904"
+
+# Worker1: 3 VMs (vm1, vm2, vm3)
+VM_CONFIG["w1_vm1"]="worker1 100 5901"  # VM1 en Worker1 - VLAN 100 (verde)
+VM_CONFIG["w1_vm2"]="worker1 200 5902"  # VM2 en Worker1 - VLAN 200 (morado)  
+VM_CONFIG["w1_vm3"]="worker1 300 5903"  # VM3 en Worker1 - VLAN 300 (amarillo)
+
+# Worker2: 3 VMs (vm1, vm2, vm3)
+VM_CONFIG["w2_vm1"]="worker2 100 5911"  # VM1 en Worker2 - VLAN 100 (verde)
+VM_CONFIG["w2_vm2"]="worker2 200 5912"  # VM2 en Worker2 - VLAN 200 (morado)
+VM_CONFIG["w2_vm3"]="worker2 300 5913"  # VM3 en Worker2 - VLAN 300 (amarillo)
+
+# Worker3: 3 VMs (vm1, vm2, vm3)  
+VM_CONFIG["w3_vm1"]="worker3 100 5921"  # VM1 en Worker3 - VLAN 100 (verde)
+VM_CONFIG["w3_vm2"]="worker3 200 5922"  # VM2 en Worker3 - VLAN 200 (morado)
+VM_CONFIG["w3_vm3"]="worker3 300 5923"  # VM3 en Worker3 - VLAN 300 (amarillo)
 
 # Función para ejecutar comandos remotos
 execute_remote() {
@@ -105,7 +117,7 @@ initialize_ofs() {
 
 # Función para crear VMs
 create_virtual_machines() {
-    echo "=== Creando Máquinas Virtuales ==="
+    echo "=== Creando Máquinas Virtuales (9 VMs total) ==="
     
     for vm_name in "${!VM_CONFIG[@]}"; do
         IFS=' ' read -r worker vlan vnc_port <<< "${VM_CONFIG[$vm_name]}"
@@ -126,8 +138,11 @@ create_virtual_machines() {
                 ;;
         esac
         
-        echo "Creando VM $vm_name en $worker (IP: $worker_ip) con VLAN $vlan..."
-        execute_remote $worker_ip "/tmp/vm_create.sh $vm_name $OVS_WORKER $vlan $vnc_port"
+        # Extraer nombre simple de VM para el script
+        vm_simple_name=$(echo $vm_name | sed 's/w[0-9]_//')
+        
+        echo "Creando VM $vm_simple_name en $worker (IP: $worker_ip) con VLAN $vlan..."
+        execute_remote $worker_ip "/tmp/vm_create.sh $vm_simple_name $OVS_WORKER $vlan $vnc_port"
     done
 }
 
@@ -140,23 +155,30 @@ show_topology_status() {
     echo "=== Workers ==="
     for worker_ip in $WORKER1_IP $WORKER2_IP $WORKER3_IP; do
         echo "Worker: $worker_ip"
-        execute_remote $worker_ip "ovs-vsctl show" | head -10
+        execute_remote $worker_ip "ovs-vsctl show" | head -15
         echo ""
     done
     
     echo "=== OpenFlow Switch ==="
     execute_remote $OFS_IP "ovs-vsctl show"
     
-    echo "=== VMs Creadas ==="
+    echo "=== VMs Creadas (según diagrama) ==="
+    echo "Worker1: 3 VMs | Worker2: 3 VMs | Worker3: 3 VMs"
+    echo "VLAN 100 (verde): VM1 en todos los workers"
+    echo "VLAN 200 (morado): VM2 en todos los workers"  
+    echo "VLAN 300 (amarillo): VM3 en todos los workers"
+    echo ""
     for vm_name in "${!VM_CONFIG[@]}"; do
         IFS=' ' read -r worker vlan vnc_port <<< "${VM_CONFIG[$vm_name]}"
-        echo "VM: $vm_name | Worker: $worker | VLAN: $vlan | VNC: $vnc_port"
+        vm_simple_name=$(echo $vm_name | sed 's/w[0-9]_//')
+        echo "VM: $vm_simple_name | Worker: $worker | VLAN: $vlan | VNC: $vnc_port"
     done
 }
 
 # Script principal
 main() {
     echo "Iniciando orquestación de la topología Fase 1..."
+    echo "CONFIGURACIÓN: 9 VMs (3 por worker, 3 VLANs)"
     
     # Lista de todos los hosts
     ALL_HOSTS=($HEADNODE_IP $WORKER1_IP $WORKER2_IP $WORKER3_IP $OFS_IP)
@@ -199,7 +221,8 @@ main() {
             "worker2") worker_ip=$WORKER2_IP ;;
             "worker3") worker_ip=$WORKER3_IP ;;
         esac
-        echo "  VM $vm_name: vncviewer $worker_ip:$vnc_port"
+        vm_simple_name=$(echo $vm_name | sed 's/w[0-9]_//')
+        echo "  VM $vm_simple_name ($worker): vncviewer $worker_ip:$vnc_port"
     done
     
     echo ""
@@ -210,12 +233,13 @@ main() {
 
 # Función de ayuda
 show_help() {
-    echo "VM Orchestrator Fase 1 - TEL141"
+    echo "VM Orchestrator Fase 1 - TEL141 (CORREGIDO)"
     echo ""
     echo "Este script configura automáticamente:"
     echo "  - Workers con Open vSwitch local"
-    echo "  - OpenFlow Switch central"
-    echo "  - VMs con configuración VLAN"
+    echo "  - OpenFlow Switch central"  
+    echo "  - 9 VMs con configuración VLAN (3 VMs por worker)"
+    echo "  - 3 VLANs: 100 (verde), 200 (morado), 300 (amarillo)"
     echo ""
     echo "Uso: $0 [opción]"
     echo "Opciones:"
