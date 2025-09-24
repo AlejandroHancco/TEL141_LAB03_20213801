@@ -19,7 +19,7 @@ OFS_IP="10.0.10.5"         # OFS - OpenFlow Switch
 # Configuración de bridges
 OVS_WORKER="br-int"
 OVS_OFS="br-data"
-
+CIRROS_IMG="/tmp/cirros-0.5.1-x86_64-disk.img"
 # Configuración de interfaces (ajustar según topología)
 # Estas son las interfaces de Data Network
 DATA_INTERFACES=("eth1" "eth2" "eth3" "eth4")
@@ -142,7 +142,7 @@ create_virtual_machines() {
         vm_simple_name=$(echo $vm_name | sed 's/w[0-9]_//')
         
         echo "Creando VM $vm_simple_name en $worker (IP: $worker_ip) con VLAN $vlan..."
-        execute_remote $worker_ip "/tmp/vm_create.sh $vm_simple_name $OVS_WORKER $vlan $vnc_port"
+        execute_remote $worker_ip "/tmp/vm_create.sh $vm_simple_name $OVS_WORKER $vlan $vnc_port $CIRROS_IMG"
     done
 }
 
