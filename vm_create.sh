@@ -7,7 +7,7 @@
 if [ $# -lt 4 ]; then
     echo "Uso: $0 <NombreVM> <NombreOvS> <VLAN_ID> <PuertoVNC> [ImagenSO]"
     echo "Ejemplo con disco vacío + ISO: $0 vm1 br-int 100 5901"
-    echo "Ejemplo con imagen SO:        $0 vm1 br-int 100 5901 /tmp/cirros.img"
+    echo "Ejemplo con imagen SO:        $0 vm1 br-int 100 5901 /tmp/cirros-0.5.1-x86_64-disk.img"
     exit 1
 fi
 
@@ -27,7 +27,7 @@ echo "=== Creando VM: $NOMBRE_VM ==="
 echo "OvS: $NOMBRE_OVS"
 echo "VLAN ID: $VLAN_ID"
 echo "Puerto VNC: $PUERTO_VNC"
-[ -n "$IMAGEN_SO" ] && echo "Imagen SO: $IMAGEN_SO"
+[ -n "$IMAGEN_SO" ] && echo "Imagen SO base: $IMAGEN_SO"
 
 # Crear directorio para VMs si no existe
 sudo mkdir -p $VM_DIR
@@ -39,17 +39,22 @@ if ! sudo ovs-vsctl br-exists $NOMBRE_OVS; then
     exit 1
 fi
 
-# Ruta del disco
+# Ruta del disco final de la VM
 DISCO_PATH="$VM_DIR/${NOMBRE_VM}.qcow2"
 
-# Si no se pasa imagen de SO → crear disco vacío
+# Crear disco según el caso
 if [ -z "$IMAGEN_SO" ]; then
+    # Caso 1: no hay imagen → crear disco vacío
     if [ ! -f $DISCO_PATH ]; then
-        echo "Creando disco virtual para $NOMBRE_VM..."
+        echo "Creando disco vacío para $NOMBRE_VM..."
         sudo qemu-img create -f qcow2 $DISCO_PATH $DISCO_SIZE
     fi
 else
-    DISCO_PATH=$IMAGEN_SO
+    # Caso 2: hay imagen → crear overlay
+    if [ ! -f $DISCO_PATH ]; then
+        echo "Creando disco overlay para $NOMBRE_VM basado en $IMAGEN_SO..."
+        sudo qemu-img create -f qcow2 -b $IMAGEN_SO $DISCO_PATH
+    fi
 fi
 
 # Crear interfaz TAP para la VM
@@ -103,5 +108,5 @@ echo "Nombre: $NOMBRE_VM"
 echo "Interfaz TAP: $TAP_INTERFACE"
 echo "VLAN ID: $VLAN_ID"
 echo "Puerto VNC: $PUERTO_VNC"
-echo "Disco/Imagen: $DISCO_PATH"
+echo "Disco: $DISCO_PATH"
 echo "Script de inicio: $STARTUP_SCRIPT"
