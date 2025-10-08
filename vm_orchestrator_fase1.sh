@@ -3,7 +3,6 @@
 # Script: vm_orchestrator_fase1.sh
 # Propósito:
 #   - Limpia configuración previa (--clean)
-#   - Distribuye scripts a nodos
 #   - Inicializa Workers
 #   - Inicializa OFS
 #   - Crea VMs con VLANs
@@ -24,9 +23,6 @@ OFS_HOST="10.0.10.5"
 # Opciones SSH
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
 
-# Scripts locales a distribuir
-SCRIPTS_LOCAL=("init_worker.sh" "init_ofs.sh" "vm_create.sh")
-
 # === Funciones auxiliares ===
 
 execute_remote() {
@@ -39,25 +35,6 @@ execute_remote_sudo() {
     local host="$1"
     local cmd="$2"
     sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$host" "echo $PASS | sudo -S bash -c '$cmd'"
-}
-
-distribute_scripts() {
-    echo "=== Distribuyendo scripts a nodos ==="
-    declare -A NODE_SCRIPTS=(
-        [$WORKER1_HOST]="init_worker.sh vm_create.sh"
-        [$WORKER2_HOST]="init_worker.sh vm_create.sh"
-        [$WORKER3_HOST]="init_worker.sh vm_create.sh"
-        [$OFS_HOST]="init_ofs.sh"
-    )
-
-    for host in "${!NODE_SCRIPTS[@]}"; do
-        for script in ${NODE_SCRIPTS[$host]}; do
-            echo "→ Copiando $script a $host:/home/$USER/"
-            sshpass -p "$PASS" scp "${SSH_OPTS[@]}" "$script" "$USER@$host:/home/$USER/"
-            echo "→ Ajustando permisos de $script en $host"
-            execute_remote "$host" "chmod +x /home/$USER/$script"
-        done
-    done
 }
 
 show_help() {
@@ -95,48 +72,74 @@ clean_configuration() {
         echo "→ Limpiando configuración en $host..."
         execute_remote_sudo "$host" "
             pkill qemu 2>/dev/null || true
-            ovs-vsctl del-br br-int 2>/dev/null || true
-            ovs-vsctl del-br br-data 2>/dev/null || true
+            ovs-vsctl --if-exists del-br br-int 2>/dev/null || true
+            ovs-vsctl --if-exists del-br br-data 2>/dev/null || true
+            ovs-vsctl --if-exists del-br br-ofs 2>/dev/null || true
             rm -f /tmp/vms/*.pid 2>/dev/null || true
             echo '✔ Limpieza completa en $host'
         "
     done
 }
 
-main() {
-    echo "==> Iniciando Fase 1 del Orquestador..."
+distribute_scripts() {
+    echo "=== Distribuyendo scripts a nodos ==="
+    NODES=($WORKER1_HOST $WORKER2_HOST $WORKER3_HOST $OFS_HOST)
+    SCRIPTS=("init_worker.sh" "vm_create.sh" "init_ofs.sh")
 
-    # 0) Limpieza previa automática
-    clean_configuration
-
-    # 0.5) Distribuir scripts
-    distribute_scripts
-
-    # 1) Inicializar Workers
-    echo "==> Inicializando Workers..."
-    for host in $WORKER1_HOST $WORKER2_HOST $WORKER3_HOST; do
-        execute_remote_sudo "$host" "/home/$USER/init_worker.sh br-int ens4"
-    done
-
-    # 2) Inicializar OFS
-    echo "==> Inicializando OFS..."
-    execute_remote_sudo "$OFS_HOST" "/home/$USER/init_ofs.sh br-ofs ens5 ens6 ens7 ens8"
-
-    # 3) Crear VMs
-    echo "==> Creando VMs..."
-    declare -A VM_PORTS=(
-        [$WORKER1_HOST]="5901 5902 5903"
-        [$WORKER2_HOST]="5904 5905 5906"
-        [$WORKER3_HOST]="5907 5908 5909"
-    )
-
-    for host in "${!VM_PORTS[@]}"; do
-        port_list=(${VM_PORTS[$host]})
-        for i in {1..3}; do
-            execute_remote_sudo "$host" "/home/$USER/vm_create.sh vm$i br-int $((i*100)) ${port_list[i-1]}"
+    for node in "${NODES[@]}"; do
+        for script in "${SCRIPTS[@]}"; do
+            # Solo copiar scripts relevantes a cada nodo
+            case "$script" in
+                init_ofs.sh)
+                    [ "$node" = "$OFS_HOST" ] && {
+                        sshpass -p "$PASS" scp "${SSH_OPTS[@]}" "$script" "$USER@$node:/home/$USER/"
+                        execute_remote_sudo "$node" "chmod +x /home/$USER/$script"
+                    }
+                    ;;
+                init_worker.sh|vm_create.sh)
+                    if [[ "$node" != "$OFS_HOST" ]]; then
+                        sshpass -p "$PASS" scp "${SSH_OPTS[@]}" "$script" "$USER@$node:/home/$USER/"
+                        execute_remote_sudo "$node" "chmod +x /home/$USER/$script"
+                    fi
+                    ;;
+            esac
         done
     done
+}
 
+initialize_workers() {
+    echo "==> Inicializando Workers..."
+    for host in $WORKER1_HOST $WORKER2_HOST $WORKER3_HOST; do
+        echo "=== Inicializando Worker en $host ==="
+        execute_remote_sudo "$host" "/home/$USER/init_worker.sh br-int ens4"
+        echo "Puertos en br-int:"
+        execute_remote_sudo "$host" "ovs-vsctl list-ports br-int"
+    done
+}
+
+initialize_ofs() {
+    echo "==> Inicializando OFS..."
+    execute_remote_sudo "$OFS_HOST" "/home/$USER/init_ofs.sh br-ofs ens5 ens6 ens7 ens8"
+}
+
+create_vms() {
+    echo "==> Creando VMs..."
+    for host in $WORKER1_HOST $WORKER2_HOST $WORKER3_HOST; do
+        for i in 1 2 3; do
+            port=$((5900 + i + (host##*.) * 0)) # Ajusta puerto si lo deseas
+            vlan=$((i * 100))
+            execute_remote_sudo "$host" "/home/$USER/vm_create.sh vm$i br-int $vlan $port"
+        done
+    done
+}
+
+main() {
+    echo "==> Iniciando Fase 1 del Orquestador..."
+    clean_configuration
+    distribute_scripts
+    initialize_workers
+    initialize_ofs
+    create_vms
     echo "==> Fase 1 del orquestador desplegada correctamente."
 }
 
