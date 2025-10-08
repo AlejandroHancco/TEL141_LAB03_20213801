@@ -26,8 +26,8 @@ VLAN_ID="$3"
 DHCP_RANGE="$4"
 GATEWAY="$5"
 
-VETH_NS="veth-${NS_NAME}"
-VETH_OVS="veth-${NS_NAME}-ovs"
+VETH_NS="v${VLAN_ID}-ns"
+VETH_OVS="v${VLAN_ID}-ovs"
 
 # Crear par veth
 ip link add "$VETH_NS" type veth peer name "$VETH_OVS"
