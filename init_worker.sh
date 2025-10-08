@@ -1,78 +1,91 @@
-#!/bin/bash
-
+#!/usr/bin/env bash
 # Script: init_worker.sh
-# Propósito: Inicializar Workers creando OvS local y conectando interfaces
-# Parámetros: nombreOvS InterfacesAConectar
+# Propósito: Inicializar Workers creando un bridge Open vSwitch (OvS) y conectando interfaces.
+# Uso: sudo ./init_worker.sh <nombreOvS> <iface1> [iface2 iface3 ...]
 
-# Verificar parámetros
-if [ $# -lt 2 ]; then
-    echo "Uso: $0 <nombreOvS> <interfaz1> [interfaz2] [interfaz3] ..."
-    echo "Ejemplo: $0 br-int eth1 eth2"
-    exit 1
+set -euo pipefail
+
+# === Comprobaciones iniciales ===
+if [[ $EUID -ne 0 ]]; then
+  echo "[ERROR] Debes ejecutar este script como root (usa sudo)." >&2
+  exit 1
 fi
 
-NOMBRE_OVS=$1
+if ! command -v ovs-vsctl >/dev/null 2>&1; then
+  echo "[ERROR] El paquete 'openvswitch-switch' no está instalado." >&2
+  echo "        Instálalo con: sudo apt update && sudo apt install -y openvswitch-switch"
+  exit 1
+fi
+
+if [[ $# -lt 2 ]]; then
+  echo "Uso: $0 <nombreOvS> <iface1> [iface2 iface3 ...]" >&2
+  echo "Ejemplo: $0 br-int eth1 eth2"
+  exit 1
+fi
+
+# === Variables ===
+OVS_BR="$1"
 shift
-INTERFACES=("$@")
+IFACES=("$@")
 
 echo "=== Inicializando Worker ==="
-echo "OvS: $NOMBRE_OVS"
-echo "Interfaces: ${INTERFACES[*]}"
+echo "Bridge OVS  : $OVS_BR"
+echo "Interfaces   : ${IFACES[*]}"
+echo
 
-# Función para verificar si OvS existe
-ovs_exists() {
-    ovs-vsctl br-exists $1 2>/dev/null
-}
-
-# Crear OvS local si no existe
-if ovs_exists $NOMBRE_OVS; then
-    echo "El bridge $NOMBRE_OVS ya existe"
+# === Crear bridge si no existe ===
+if ovs-vsctl br-exists "$OVS_BR" 2>/dev/null; then
+  echo "[INFO] El bridge $OVS_BR ya existe."
 else
-    echo "Creando bridge $NOMBRE_OVS..."
-    sudo ovs-vsctl add-br $NOMBRE_OVS
-    if [ $? -eq 0 ]; then
-        echo "Bridge $NOMBRE_OVS creado exitosamente"
-    else
-        echo "Error al crear el bridge $NOMBRE_OVS"
-        exit 1
-    fi
+  echo "[INFO] Creando bridge $OVS_BR..."
+  ovs-vsctl add-br "$OVS_BR"
+  echo "[OK] Bridge $OVS_BR creado exitosamente."
 fi
 
-# Conectar interfaces al OvS
-for interface in "${INTERFACES[@]}"; do
-    echo "Verificando interfaz $interface..."
-    
-    # Verificar si la interfaz existe
-    if ! ip link show $interface >/dev/null 2>&1; then
-        echo "Advertencia: La interfaz $interface no existe"
-        continue
-    fi
-    
-    # Verificar si la interfaz ya está conectada al bridge
-    if sudo ovs-vsctl port-to-br $interface 2>/dev/null | grep -q $NOMBRE_OVS; then
-        echo "La interfaz $interface ya está conectada al bridge $NOMBRE_OVS"
-    else
-        echo "Conectando interfaz $interface al bridge $NOMBRE_OVS..."
-        
-        # Limpiar configuración IP de la interfaz antes de agregarla
-        sudo ip addr flush dev $interface
-        
-        # Agregar interfaz al bridge
-        sudo ovs-vsctl add-port $NOMBRE_OVS $interface
-        if [ $? -eq 0 ]; then
-            echo "Interfaz $interface agregada exitosamente al bridge $NOMBRE_OVS"
-            
-            # Configurar como trunk port por defecto
-            sudo ovs-vsctl set port $interface trunk=0-4094
-        else
-            echo "Error al agregar la interfaz $interface al bridge $NOMBRE_OVS"
-        fi
-    fi
+# Levantar el bridge
+ip link set dev "$OVS_BR" up || true
+echo "[OK] Bridge $OVS_BR levantado."
+
+# === Conectar interfaces ===
+for IFACE in "${IFACES[@]}"; do
+  echo
+  echo ">> Procesando interfaz: $IFACE"
+
+  if ! ip link show "$IFACE" >/dev/null 2>&1; then
+    echo "  [WARN] La interfaz $IFACE no existe. Omitiendo..."
+    continue
+  fi
+
+  # Verificar si la interfaz ya pertenece al bridge
+  CURRENT_BR=$(ovs-vsctl port-to-br "$IFACE" 2>/dev/null || true)
+  if [[ "$CURRENT_BR" == "$OVS_BR" ]]; then
+    echo "  [INFO] La interfaz $IFACE ya está conectada a $OVS_BR."
+    continue
+  elif [[ -n "$CURRENT_BR" ]]; then
+    echo "  [WARN] La interfaz $IFACE pertenece actualmente a $CURRENT_BR. Omitiendo..."
+    continue
+  fi
+
+  # Limpiar IPs de la interfaz
+  echo "  [INFO] Limpiando configuración IP de $IFACE..."
+  ip addr flush dev "$IFACE" || true
+
+  # Agregar interfaz al bridge
+  echo "  [INFO] Agregando $IFACE al bridge $OVS_BR..."
+  ovs-vsctl add-port "$OVS_BR" "$IFACE"
+  echo "  [OK] Interfaz $IFACE agregada."
+
+  # Configurar como trunk
+  echo "  [INFO] Configurando $IFACE como trunk (0–4094)..."
+  ovs-vsctl set port "$IFACE" trunk=0-4094 || true
+
+  # Levantar la interfaz
+  ip link set dev "$IFACE" up || true
+  echo "  [OK] Interfaz $IFACE levantada."
 done
 
-# Levantar el bridge
-sudo ip link set $NOMBRE_OVS up
-
+# === Mostrar resumen ===
+echo
 echo "=== Worker inicializado correctamente ==="
-echo "Puertos del bridge $NOMBRE_OVS:"
-sudo ovs-vsctl list-ports $NOMBRE_OVS
+echo "Puertos en $OVS_BR:"
+ovs-vsctl list-ports "$OVS_BR"
