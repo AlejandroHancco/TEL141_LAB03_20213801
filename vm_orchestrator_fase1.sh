@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# vm_orchestrator_fase1.sh
-# Orquesta toda la Fase 1:
-# - Limpia configuración previa (--clean)
-# - Distribuye scripts a los nodos
-# - Inicializa Workers
-# - Inicializa OFS
-# - Crea VMs con VLANs
-# - Muestra estado (--status)
-# - Ayuda (--help)
+# ==========================================================
+# Script: vm_orchestrator_fase1.sh
+# Propósito:
+#   - Limpia configuración previa (--clean)
+#   - Distribuye scripts a nodos
+#   - Inicializa Workers
+#   - Inicializa OFS
+#   - Crea VMs con VLANs
+#   - Muestra estado (--status)
+# ==========================================================
 
 set -euo pipefail
 
@@ -20,7 +21,11 @@ WORKER2_HOST="10.0.10.2"
 WORKER3_HOST="10.0.10.3"
 OFS_HOST="10.0.10.5"
 
+# Opciones SSH
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+
+# Scripts locales a distribuir
+SCRIPTS_LOCAL=("init_worker.sh" "init_ofs.sh" "vm_create.sh")
 
 # === Funciones auxiliares ===
 
@@ -28,6 +33,25 @@ execute_remote() {
     local host="$1"
     local cmd="$2"
     sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$host" "bash -c '$cmd'"
+}
+
+distribute_scripts() {
+    echo "=== Distribuyendo scripts a nodos ==="
+    declare -A NODE_SCRIPTS=(
+        [$WORKER1_HOST]="init_worker.sh vm_create.sh"
+        [$WORKER2_HOST]="init_worker.sh vm_create.sh"
+        [$WORKER3_HOST]="init_worker.sh vm_create.sh"
+        [$OFS_HOST]="init_ofs.sh"
+    )
+
+    for host in "${!NODE_SCRIPTS[@]}"; do
+        for script in ${NODE_SCRIPTS[$host]}; do
+            echo "→ Copiando $script a $host:/home/$USER/"
+            sshpass -p "$PASS" scp "${SSH_OPTS[@]}" "$script" "$USER@$host:/home/$USER/"
+            echo "→ Ajustando permisos de $script en $host"
+            execute_remote "$host" "chmod +x /home/$USER/$script"
+        done
+    done
 }
 
 show_help() {
@@ -73,52 +97,41 @@ clean_configuration() {
     done
 }
 
-distribute_scripts() {
-    echo "=== Distribuyendo scripts a todos los nodos ==="
-    ALL_HOSTS=($WORKER1_HOST $WORKER2_HOST $WORKER3_HOST $OFS_HOST)
-
-    for host in "${ALL_HOSTS[@]}"; do
-        echo "→ Copiando scripts a $host..."
-        sshpass -p "$PASS" scp "${SSH_OPTS[@]}" ./*.sh "$USER@$host:/home/ubuntu/TEL141_LAB03_20213801/" >/dev/null
-        execute_remote "$host" "chmod +x /home/ubuntu/TEL141_LAB03_20213801/*.sh"
-        echo "✔ Scripts actualizados y con permisos en $host"
-    done
-}
-
 main() {
     echo "==> Iniciando Fase 1 del Orquestador..."
 
-    # 0) Distribuir scripts antes de cualquier acción
-    distribute_scripts
-
-    # 1) Limpieza previa automática
+    # 0) Limpieza previa automática
     clean_configuration
 
-    # 2) Inicializar Workers
+    # 0.5) Distribuir scripts
+    distribute_scripts
+
+    # 1) Inicializar Workers
     echo "==> Inicializando Workers..."
-    sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$WORKER1_HOST" "sudo ./init_worker.sh br-int ens4"
-    sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$WORKER2_HOST" "sudo ./init_worker.sh br-int ens4"
-    sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$WORKER3_HOST" "sudo ./init_worker.sh br-int ens4"
+    for host in $WORKER1_HOST $WORKER2_HOST $WORKER3_HOST; do
+        execute_remote "$host" "sudo /home/$USER/init_worker.sh br-int ens4"
+    done
 
-    # 3) Inicializar OFS
+    # 2) Inicializar OFS
     echo "==> Inicializando OFS..."
-    sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$OFS_HOST" "sudo ./init_ofs.sh br-ofs ens5 ens6 ens7 ens8"
+    execute_remote "$OFS_HOST" "sudo /home/$USER/init_ofs.sh br-ofs ens5 ens6 ens7 ens8"
 
-    # 4) Crear VMs
+    # 3) Crear VMs
     echo "==> Creando VMs..."
-    sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$WORKER1_HOST" "sudo ./vm_create.sh vm1 br-int 100 5901"
-    sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$WORKER1_HOST" "sudo ./vm_create.sh vm2 br-int 200 5902"
-    sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$WORKER1_HOST" "sudo ./vm_create.sh vm3 br-int 300 5903"
+    declare -A VM_PORTS=(
+        [$WORKER1_HOST]="5901 5902 5903"
+        [$WORKER2_HOST]="5904 5905 5906"
+        [$WORKER3_HOST]="5907 5908 5909"
+    )
 
-    sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$WORKER2_HOST" "sudo ./vm_create.sh vm1 br-int 100 5904"
-    sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$WORKER2_HOST" "sudo ./vm_create.sh vm2 br-int 200 5905"
-    sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$WORKER2_HOST" "sudo ./vm_create.sh vm3 br-int 300 5906"
+    for host in "${!VM_PORTS[@]}"; do
+        port_list=(${VM_PORTS[$host]})
+        for i in {1..3}; do
+            execute_remote "$host" "sudo /home/$USER/vm_create.sh vm$i br-int $((i*100)) ${port_list[i-1]}"
+        done
+    done
 
-    sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$WORKER3_HOST" "sudo ./vm_create.sh vm1 br-int 100 5907"
-    sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$WORKER3_HOST" "sudo ./vm_create.sh vm2 br-int 200 5908"
-    sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$WORKER3_HOST" "sudo ./vm_create.sh vm3 br-int 300 5909"
-
-    echo "✅ Fase 1 del orquestador desplegada correctamente."
+    echo "==> Fase 1 del orquestador desplegada correctamente."
 }
 
 # === Procesamiento de argumentos ===
@@ -144,5 +157,3 @@ case ${1:-} in
         exit 1
         ;;
 esac
-
-
