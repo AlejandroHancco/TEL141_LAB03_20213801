@@ -11,7 +11,7 @@
 set -euo pipefail
 
 USER="ubuntu"
-PASS="ubuntu"
+PASS="ubuntu123"
 
 # Hosts
 WORKER1_HOST="10.0.10.1"
