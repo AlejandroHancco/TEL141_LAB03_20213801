@@ -10,7 +10,7 @@
 set -euo pipefail
 
 USER="ubuntu"
-PASS="contra213"
+PASS="ubuntu"
 
 HEADNODE_HOST="10.0.10.4"
 OFS_HOST="10.0.10.5"
