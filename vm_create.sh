@@ -1,112 +1,127 @@
-#!/bin/bash
-
+#!/usr/bin/env bash
+# ==========================================================
 # Script: vm_create.sh
-# Propósito: Crear una VM y conectarla al OvS con VLAN específica
-# Parámetros: NombreVM NombreOvS VLAN_ID PuertoVNC [ImagenSO]
+# Propósito: Crear una VM ligera (QEMU + Cirros) y conectarla
+#             a un bridge Open vSwitch con una VLAN específica.
+# Uso: sudo ./vm_create.sh <NombreVM> <NombreOvS> <VLAN_ID> <PuertoVNC>
+# Ejemplo:
+#   sudo ./vm_create.sh vm1 br-int 100 5901
+# ==========================================================
 
-if [ $# -lt 4 ]; then
-    echo "Uso: $0 <NombreVM> <NombreOvS> <VLAN_ID> <PuertoVNC> [ImagenSO]"
-    echo "Ejemplo con disco vacío + ISO: $0 vm1 br-int 100 5901"
-    echo "Ejemplo con imagen SO:        $0 vm1 br-int 100 5901 /tmp/cirros-0.5.1-x86_64-disk.img"
-    exit 1
+set -euo pipefail
+
+# === Colores para salida ===
+RED="\e[31m"
+GREEN="\e[32m"
+YELLOW="\e[33m"
+BLUE="\e[36m"
+RESET="\e[0m"
+
+# === Función de log ===
+log()    { echo -e "${BLUE}[INFO]${RESET} $*"; }
+warn()   { echo -e "${YELLOW}[WARN]${RESET} $*"; }
+error()  { echo -e "${RED}[ERROR]${RESET} $*" >&2; }
+
+# === Validaciones iniciales ===
+if [[ $EUID -ne 0 ]]; then
+  error "Debes ejecutar este script como root (usa sudo)."
+  exit 1
 fi
 
-NOMBRE_VM=$1
-NOMBRE_OVS=$2
-VLAN_ID=$3
-PUERTO_VNC=$4
-IMAGEN_SO=$5
-
-# Configuración por defecto
-RAM_MB=1024
-DISCO_SIZE="10G"
-VM_DIR="/tmp/vms"
-ISO_PATH="/tmp/ubuntu-server.iso"  # Se usará solo si no hay IMAGEN_SO
-
-echo "=== Creando VM: $NOMBRE_VM ==="
-echo "OvS: $NOMBRE_OVS"
-echo "VLAN ID: $VLAN_ID"
-echo "Puerto VNC: $PUERTO_VNC"
-[ -n "$IMAGEN_SO" ] && echo "Imagen SO base: $IMAGEN_SO"
-
-# Crear directorio para VMs si no existe
-sudo mkdir -p $VM_DIR
-cd $VM_DIR
-
-# Verificar que el bridge OvS existe
-if ! sudo ovs-vsctl br-exists $NOMBRE_OVS; then
-    echo "Error: El bridge $NOMBRE_OVS no existe"
-    exit 1
+if [[ $# -ne 4 ]]; then
+  error "Uso incorrecto."
+  echo -e "Formato: ${YELLOW}$0 <NombreVM> <NombreOvS> <VLAN_ID> <PuertoVNC>${RESET}"
+  echo -e "Ejemplo: ${YELLOW}$0 vm1 br-int 100 5901${RESET}"
+  exit 1
 fi
 
-# Ruta del disco final de la VM
-DISCO_PATH="$VM_DIR/${NOMBRE_VM}.qcow2"
+# === Variables ===
+VM_NAME="$1"
+OVS_BR="$2"
+VLAN_ID="$3"
+VNC_PORT="$4"
+IMG="cirros-0.5.1-x86_64-disk.img"
+TAP_IF="tap-${VM_NAME}"
 
-# Crear disco según el caso
-if [ -z "$IMAGEN_SO" ]; then
-    # Caso 1: no hay imagen → crear disco vacío
-    if [ ! -f $DISCO_PATH ]; then
-        echo "Creando disco vacío para $NOMBRE_VM..."
-        sudo qemu-img create -f qcow2 $DISCO_PATH $DISCO_SIZE
-    fi
-else
-    # Caso 2: hay imagen → crear overlay
-    if [ ! -f $DISCO_PATH ]; then
-        echo "Creando disco overlay para $NOMBRE_VM basado en $IMAGEN_SO..."
-        sudo qemu-img create -f qcow2 -b $IMAGEN_SO $DISCO_PATH
-    fi
+log "Inicializando creación de VM:"
+echo "  VM_NAME : $VM_NAME"
+echo "  OVS_BR  : $OVS_BR"
+echo "  VLAN_ID : $VLAN_ID"
+echo "  VNC_PORT: $VNC_PORT"
+echo
+
+# === Comprobaciones de entorno ===
+if [[ ! -f "$IMG" ]]; then
+  error "No se encuentra la imagen ${IMG} en el directorio actual."
+  exit 1
 fi
 
-# Crear interfaz TAP para la VM
-TAP_INTERFACE="tap-$NOMBRE_VM"
-echo "Creando interfaz TAP: $TAP_INTERFACE"
-sudo ip tuntap del dev $TAP_INTERFACE mode tap 2>/dev/null
-sudo ip tuntap add dev $TAP_INTERFACE mode tap
-sudo ip link set $TAP_INTERFACE up
-
-# Conectar TAP al OvS y asignar VLAN
-echo "Conectando $TAP_INTERFACE al bridge $NOMBRE_OVS con VLAN $VLAN_ID"
-sudo ovs-vsctl add-port $NOMBRE_OVS $TAP_INTERFACE
-sudo ovs-vsctl set port $TAP_INTERFACE tag=$VLAN_ID
-
-# Script de inicio
-STARTUP_SCRIPT="$VM_DIR/start_${NOMBRE_VM}.sh"
-cat > $STARTUP_SCRIPT << EOF
-#!/bin/bash
-if pgrep -f "qemu.*${NOMBRE_VM}" > /dev/null; then
-    echo "La VM $NOMBRE_VM ya está ejecutándose"
-    exit 1
+if ! command -v ovs-vsctl >/dev/null 2>&1; then
+  error "Open vSwitch no está instalado (falta ovs-vsctl)."
+  echo "        Instálalo con: sudo apt update && sudo apt install -y openvswitch-switch"
+  exit 1
 fi
 
-sudo qemu-system-x86_64 \\
-    -enable-kvm \\
-    -name $NOMBRE_VM \\
-    -m $RAM_MB \\
-    -hda $DISCO_PATH \\
-    -netdev tap,id=net0,ifname=$TAP_INTERFACE,script=no,downscript=no \\
-    -device virtio-net-pci,netdev=net0,mac=52:54:00:\$(printf '%02x:%02x:%02x' \$((RANDOM%256)) \$((RANDOM%256)) \$((RANDOM%256))) \\
-    -vnc :$(($PUERTO_VNC - 5900)) \\
-    -daemonize \\
-    -pidfile $VM_DIR/${NOMBRE_VM}.pid \\
-EOF
-
-# Si no hay imagen, añadir arranque desde ISO
-if [ -z "$IMAGEN_SO" ] && [ -f $ISO_PATH ]; then
-    echo "    -cdrom $ISO_PATH \\" >> $STARTUP_SCRIPT
-    echo "    -boot d \\" >> $STARTUP_SCRIPT
+if ! command -v qemu-system-x86_64 >/dev/null 2>&1; then
+  error "QEMU no está instalado (falta qemu-system-x86_64)."
+  echo "        Instálalo con: sudo apt install -y qemu-kvm"
+  exit 1
 fi
 
-chmod +x $STARTUP_SCRIPT
+# === Validaciones de parámetros ===
+if ! ovs-vsctl br-exists "$OVS_BR"; then
+  error "No existe el bridge de OvS '$OVS_BR'."
+  exit 1
+fi
 
-# Iniciar la VM
-echo "Iniciando VM $NOMBRE_VM..."
-bash $STARTUP_SCRIPT
+if ! [[ "$VLAN_ID" =~ ^[0-9]+$ ]] || (( VLAN_ID < 1 || VLAN_ID > 4094 )); then
+  error "VLAN_ID inválido: $VLAN_ID (debe estar entre 1 y 4094)."
+  exit 1
+fi
 
-# Info final
-echo "=== Configuración de la VM ==="
-echo "Nombre: $NOMBRE_VM"
-echo "Interfaz TAP: $TAP_INTERFACE"
-echo "VLAN ID: $VLAN_ID"
-echo "Puerto VNC: $PUERTO_VNC"
-echo "Disco: $DISCO_PATH"
-echo "Script de inicio: $STARTUP_SCRIPT"
+if [[ "$VNC_PORT" -le 5900 ]]; then
+  error "El puerto VNC debe ser mayor a 5900 (ejemplo: 5901, 5902...)."
+  exit 1
+fi
+
+if ip link show "$TAP_IF" >/dev/null 2>&1; then
+  error "La interfaz TAP '$TAP_IF' ya existe."
+  echo "        Elimínala o usa otro NombreVM. Comandos sugeridos:"
+  echo "          sudo ip link set $TAP_IF down"
+  echo "          sudo ip link del  $TAP_IF"
+  exit 1
+fi
+
+# === Generar dirección MAC aleatoria ===
+RAND_HEX=$(hexdump -n3 -v -e '/1 "%02x"' /dev/urandom)
+MAC_ADDR="52:54:00:${RAND_HEX:0:2}:${RAND_HEX:2:2}:${RAND_HEX:4:2}"
+
+log "MAC generada: ${MAC_ADDR}"
+
+# === Crear interfaz TAP ===
+log "Creando interfaz TAP ${TAP_IF} ..."
+ip tuntap add mode tap name "$TAP_IF"
+ip link set "$TAP_IF" up
+
+# === Conectar TAP al OVS con VLAN ===
+log "Conectando ${TAP_IF} a ${OVS_BR} con VLAN ${VLAN_ID} ..."
+ovs-vsctl --may-exist add-port "$OVS_BR" "$TAP_IF" tag="$VLAN_ID"
+
+# === Lanzar la VM ===
+log "Lanzando VM ${VM_NAME} (VNC :$((VNC_PORT-5900))) ..."
+qemu-system-x86_64 \
+  -enable-kvm \
+  -vnc 0.0.0.0:$((VNC_PORT-5900)) \
+  -netdev tap,id="$TAP_IF",ifname="$TAP_IF",script=no,downscript=no \
+  -device e1000,netdev="$TAP_IF",mac="$MAC_ADDR" \
+  -daemonize \
+  -snapshot \
+  "$IMG"
+
+log "VM ${VM_NAME} creada exitosamente."
+echo -e "${GREEN}VNC disponible en :$((VNC_PORT-5900)) (puerto TCP $VNC_PORT)${RESET}"
+echo
+echo "Para visualizar:"
+echo "  vncviewer localhost:$((VNC_PORT-5900))"
+echo "Para listar las VMs en ejecución:"
+echo "  ps aux | grep qemu"
