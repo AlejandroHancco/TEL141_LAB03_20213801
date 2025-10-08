@@ -11,17 +11,18 @@ set -euo pipefail
 
 USER="ubuntu"
 PASS="ubuntu123"
+REMOTE_DIR="/home/ubuntu/TEL141_LAB03_20213801"
 
 HEADNODE_HOST="10.0.10.4"
 OFS_HOST="10.0.10.5"
 
-SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -tt)
+SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
 
-# === Función para ejecutar comandos remotos con sudo sin interacción ===
+# === Función para ejecutar comandos remotos con sudo ===
 execute_remote() {
     local host="$1"
     local cmd="$2"
-    sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$host" "echo $PASS | sudo -S bash -c '$cmd'"
+    sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$host" "cd $REMOTE_DIR && echo $PASS | sudo -S bash -c '$cmd'"
 }
 
 # === Inicializar HeadNode ===
@@ -45,5 +46,4 @@ echo "==> Mostrando estado de red (HeadNode y OFS)..."
 execute_remote "$HEADNODE_HOST" "ovs-vsctl show"
 execute_remote "$OFS_HOST" "ovs-vsctl show"
 
-echo " Fase 2 completada: VLANs y namespaces configurados correctamente."
-
+echo "✅ Fase 2 completada: VLANs y namespaces configurados correctamente."
