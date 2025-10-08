@@ -1,25 +1,21 @@
 #!/usr/bin/env bash
-# ============================================================
+# ==========================================================
 # Script: init_ofs.sh
-# Propósito: Inicializar el OpenFlow Switch (OFS)
-# Uso: sudo ./init_ofs.sh <NombreOvS> <puerto1> [puerto2 puerto3 ...]
-# Ejemplo: sudo ./init_ofs.sh br-data eth1 eth2 eth3
-# ============================================================
+# Propósito: Inicializar el OpenFlow Switch (OFS) para VLANs
+# Uso: sudo ./init_ofs.sh <NombreOvS> <puerto1> [puerto2 ...]
+# ==========================================================
 
 set -euo pipefail
 
 echo "=== Inicializando OpenFlow Switch (OFS) ==="
 
-# --- Verificar que se ejecute como root ---
 if [[ $EUID -ne 0 ]]; then
   echo "[ERROR] Debes ejecutar este script como root (sudo)." >&2
   exit 1
 fi
 
-# --- Verificar parámetros ---
 if [[ $# -lt 2 ]]; then
   echo "Uso: $0 <NombreOvS> <puerto1> [puerto2 ...]" >&2
-  echo "Ejemplo: $0 br-data eth1 eth2 eth3" >&2
   exit 1
 fi
 
@@ -27,56 +23,36 @@ NOMBRE_OVS="$1"
 shift
 PUERTOS=("$@")
 
-echo "Bridge (OvS): $NOMBRE_OVS"
-echo "Puertos Data Network: ${PUERTOS[*]}"
-echo ""
-
-# --- Verificar existencia del bridge ---
-echo "=== Verificando existencia del bridge ==="
-if ! ovs-vsctl br-exists "$NOMBRE_OVS"; then
-  echo "[ERROR] No existe el OvS '$NOMBRE_OVS'. Créalo antes con:"
-  echo "        sudo ovs-vsctl add-br $NOMBRE_OVS"
-  exit 1
+# Crear OvS si no existe
+if ovs-vsctl br-exists "$NOMBRE_OVS"; then
+  echo "[INFO] El bridge $NOMBRE_OVS ya existe."
 else
-  echo "El bridge $NOMBRE_OVS existe. Continuando..."
+  echo "[INFO] Creando bridge $NOMBRE_OVS..."
+  ovs-vsctl add-br "$NOMBRE_OVS"
 fi
-echo ""
 
-# --- Procesar interfaces ---
-for PUERTO in "${PUERTOS[@]}"; do
-  echo "=== Procesando puerto: $PUERTO ==="
-  
-  # Verificar si la interfaz existe
-  if ! ip link show "$PUERTO" >/dev/null 2>&1; then
-    echo "[ADVERTENCIA] La interfaz '$PUERTO' no existe en este host. Omitiendo..."
-    echo ""
-    continue
+# Agregar puertos físicos (trunk)
+for P in "${PUERTOS[@]}"; do
+  if ip link show "$P" >/dev/null 2>&1; then
+    ip addr flush dev "$P"
+    ovs-vsctl --may-exist add-port "$NOMBRE_OVS" "$P"
+    ovs-vsctl set port "$P" trunk=0-4094
+    ip link set "$P" up
   fi
-
-  # Limpiar IPs previas
-  echo "Limpiando configuraciones IP de $PUERTO..."
-  ip addr flush dev "$PUERTO"
-
-  # Agregar puerto al OvS (sin error si ya existe)
-  echo "Agregando $PUERTO al bridge $NOMBRE_OVS..."
-  ovs-vsctl --may-exist add-port "$NOMBRE_OVS" "$PUERTO"
-
-  echo "Puerto $PUERTO agregado exitosamente."
-  echo ""
 done
 
-echo "=== OFS inicializado correctamente ==="
-echo "Bridge configurado: $NOMBRE_OVS"
-echo "Puertos añadidos:"
-ovs-vsctl list-ports "$NOMBRE_OVS"
+# Crear gateways por VLAN (para salida a Internet)
+for VLAN in 100 200 300; do
+  VLAN_IF="vlan${VLAN}"
+  ip link add link "$NOMBRE_OVS" name "$VLAN_IF" type vlan id "$VLAN" || true
+  ip addr add "192.168.${VLAN}.1/24" dev "$VLAN_IF" || true
+  ip link set "$VLAN_IF" up
+done
 
-echo ""
-echo "=== Detalles de configuración OvS ==="
+# Reglas NAT para acceso a Internet (suponiendo salida por ens3)
+INET_IF="ens3"
+iptables -t nat -A POSTROUTING -o "$INET_IF" -j MASQUERADE
+echo 1 > /proc/sys/net/ipv4/ip_forward
+
+echo "=== OFS configurado con VLANs y NAT habilitado ==="
 ovs-vsctl show
-
-echo ""
-echo "=== Estado del bridge ==="
-ovs-appctl fdb/show "$NOMBRE_OVS" || echo "(No hay tabla MAC disponible todavía)"
-
-echo ""
-echo "=== Proceso completado ==="
