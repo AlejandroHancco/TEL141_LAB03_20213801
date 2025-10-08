@@ -35,6 +35,12 @@ execute_remote() {
     sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$host" "bash -c '$cmd'"
 }
 
+execute_remote_sudo() {
+    local host="$1"
+    local cmd="$2"
+    sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$host" "echo $PASS | sudo -S bash -c '$cmd'"
+}
+
 distribute_scripts() {
     echo "=== Distribuyendo scripts a nodos ==="
     declare -A NODE_SCRIPTS=(
@@ -70,9 +76,9 @@ show_topology_status() {
 
     for host in "${ALL_HOSTS[@]}"; do
         echo "---- $host ----"
-        execute_remote "$host" "
+        execute_remote_sudo "$host" "
             echo 'Bridges existentes:'
-            sudo ovs-vsctl list-br || echo '(sin bridges)'
+            ovs-vsctl list-br || echo '(sin bridges)'
             echo ''
             echo 'VMs activas:'
             pgrep -a qemu || echo '(sin VMs)'
@@ -87,11 +93,11 @@ clean_configuration() {
 
     for host in "${ALL_HOSTS[@]}"; do
         echo "→ Limpiando configuración en $host..."
-        execute_remote "$host" "
-            sudo pkill qemu 2>/dev/null || true
-            sudo ovs-vsctl del-br br-int 2>/dev/null || true
-            sudo ovs-vsctl del-br br-data 2>/dev/null || true
-            sudo rm -f /tmp/vms/*.pid 2>/dev/null || true
+        execute_remote_sudo "$host" "
+            pkill qemu 2>/dev/null || true
+            ovs-vsctl del-br br-int 2>/dev/null || true
+            ovs-vsctl del-br br-data 2>/dev/null || true
+            rm -f /tmp/vms/*.pid 2>/dev/null || true
             echo '✔ Limpieza completa en $host'
         "
     done
@@ -109,12 +115,12 @@ main() {
     # 1) Inicializar Workers
     echo "==> Inicializando Workers..."
     for host in $WORKER1_HOST $WORKER2_HOST $WORKER3_HOST; do
-        execute_remote "$host" "sudo /home/$USER/init_worker.sh br-int ens4"
+        execute_remote_sudo "$host" "/home/$USER/init_worker.sh br-int ens4"
     done
 
     # 2) Inicializar OFS
     echo "==> Inicializando OFS..."
-    execute_remote "$OFS_HOST" "sudo /home/$USER/init_ofs.sh br-ofs ens5 ens6 ens7 ens8"
+    execute_remote_sudo "$OFS_HOST" "/home/$USER/init_ofs.sh br-ofs ens5 ens6 ens7 ens8"
 
     # 3) Crear VMs
     echo "==> Creando VMs..."
@@ -127,7 +133,7 @@ main() {
     for host in "${!VM_PORTS[@]}"; do
         port_list=(${VM_PORTS[$host]})
         for i in {1..3}; do
-            execute_remote "$host" "sudo /home/$USER/vm_create.sh vm$i br-int $((i*100)) ${port_list[i-1]}"
+            execute_remote_sudo "$host" "/home/$USER/vm_create.sh vm$i br-int $((i*100)) ${port_list[i-1]}"
         done
     done
 
