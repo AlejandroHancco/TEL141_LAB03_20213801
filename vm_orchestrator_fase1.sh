@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# ==========================================================
-# Script: vm_orchestrator_fase1.sh
-# Propósito:
-#   - Limpia configuración previa (--clean)
-#   - Inicializa Workers
-#   - Inicializa OFS
-#   - Crea VMs con VLANs
-#   - Muestra estado (--status)
-# ==========================================================
+# vm_orchestrator_fase1.sh
+# Orquesta toda la Fase 1:
+# - Limpia configuración previa (--clean)
+# - Distribuye scripts a los nodos
+# - Inicializa Workers
+# - Inicializa OFS
+# - Crea VMs con VLANs
+# - Muestra estado (--status)
+# - Ayuda (--help)
 
 set -euo pipefail
 
@@ -20,7 +20,6 @@ WORKER2_HOST="10.0.10.2"
 WORKER3_HOST="10.0.10.3"
 OFS_HOST="10.0.10.5"
 
-# Opciones SSH
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
 
 # === Funciones auxiliares ===
@@ -74,23 +73,38 @@ clean_configuration() {
     done
 }
 
+distribute_scripts() {
+    echo "=== Distribuyendo scripts a todos los nodos ==="
+    ALL_HOSTS=($WORKER1_HOST $WORKER2_HOST $WORKER3_HOST $OFS_HOST)
+
+    for host in "${ALL_HOSTS[@]}"; do
+        echo "→ Copiando scripts a $host..."
+        sshpass -p "$PASS" scp "${SSH_OPTS[@]}" ./*.sh "$USER@$host:/home/ubuntu/TEL141_LAB03_20213801/" >/dev/null
+        execute_remote "$host" "chmod +x /home/ubuntu/TEL141_LAB03_20213801/*.sh"
+        echo "✔ Scripts actualizados y con permisos en $host"
+    done
+}
+
 main() {
     echo "==> Iniciando Fase 1 del Orquestador..."
 
-    # 0) Limpieza previa automática
+    # 0) Distribuir scripts antes de cualquier acción
+    distribute_scripts
+
+    # 1) Limpieza previa automática
     clean_configuration
 
-    # 1) Inicializar Workers
+    # 2) Inicializar Workers
     echo "==> Inicializando Workers..."
     sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$WORKER1_HOST" "sudo ./init_worker.sh br-int ens4"
     sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$WORKER2_HOST" "sudo ./init_worker.sh br-int ens4"
     sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$WORKER3_HOST" "sudo ./init_worker.sh br-int ens4"
 
-    # 2) Inicializar OFS
+    # 3) Inicializar OFS
     echo "==> Inicializando OFS..."
     sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$OFS_HOST" "sudo ./init_ofs.sh br-ofs ens5 ens6 ens7 ens8"
 
-    # 3) Crear VMs
+    # 4) Crear VMs
     echo "==> Creando VMs..."
     sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$WORKER1_HOST" "sudo ./vm_create.sh vm1 br-int 100 5901"
     sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$WORKER1_HOST" "sudo ./vm_create.sh vm2 br-int 200 5902"
@@ -104,7 +118,7 @@ main() {
     sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$WORKER3_HOST" "sudo ./vm_create.sh vm2 br-int 200 5908"
     sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" "$USER@$WORKER3_HOST" "sudo ./vm_create.sh vm3 br-int 300 5909"
 
-    echo "==> Fase 1 del orquestador desplegada correctamente."
+    echo "✅ Fase 1 del orquestador desplegada correctamente."
 }
 
 # === Procesamiento de argumentos ===
@@ -130,4 +144,5 @@ case ${1:-} in
         exit 1
         ;;
 esac
+
 
