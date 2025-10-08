@@ -34,7 +34,7 @@ echo "==> Creando namespaces y configurando DHCP + Gateway..."
 execute_remote "$HEADNODE_HOST" "
 ./ns_create.sh vlan100 br-int 100 '192.168.100.10-192.168.100.50' 192.168.100.1
 ./ns_create.sh vlan200 br-int 200 '192.168.200.10-192.168.200.50' 192.168.200.1
-./ns_create.sh vlan300 br-int 300 '192.168.300.10-192.168.300.50' 192.168.300.1
+./ns_create.sh vlan300 br-int 300 '192.168.230.10-192.168.230.50' 192.168.230.1
 "
 
 # === Inicializar OFS central ===
