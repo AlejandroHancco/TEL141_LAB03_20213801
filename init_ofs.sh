@@ -49,8 +49,8 @@ for VLAN in 100 200 300; do
   ip link set "$VLAN_IF" up
 done
 
-# Reglas NAT para acceso a Internet (suponiendo salida por ens3)
-INET_IF="ens3"
+# Reglas NAT para acceso a Internet (suponiendo salida por ens7)
+INET_IF="ens7"
 iptables -t nat -A POSTROUTING -o "$INET_IF" -j MASQUERADE
 echo 1 > /proc/sys/net/ipv4/ip_forward
 
