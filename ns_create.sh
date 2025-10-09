@@ -59,14 +59,17 @@ ip link set "$VETH_OVS" up
 
 # --- Configurar DHCP con dnsmasq ---
 mkdir -p /tmp/ns_${NS_NAME}
+# Separar rango DHCP por guion y convertir a coma
+IFS='-' read -r DHCP_START DHCP_END <<< "$DHCP_RANGE"
+
 cat > /tmp/ns_${NS_NAME}/dnsmasq.conf <<EOF
 interface=$VETH_NS
-dhcp-range=$DHCP_RANGE,12h
+dhcp-range=$DHCP_START,$DHCP_END,12h
 dhcp-option=3,$GATEWAY
 bind-interfaces
 EOF
-
 # Ejecutar dnsmasq en el namespace
+
 if ! ip netns exec "$NS_NAME" pgrep -f "dnsmasq.*$VETH_NS" >/dev/null 2>&1; then
     ip netns exec "$NS_NAME" dnsmasq --conf-file=/tmp/ns_${NS_NAME}/dnsmasq.conf --pid-file=/tmp/ns_${NS_NAME}/dnsmasq.pid
     echo "[OK] dnsmasq iniciado en $NS_NAME"
