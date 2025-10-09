@@ -23,7 +23,9 @@ NOMBRE_OVS="$1"
 shift
 PUERTOS=("$@")
 
-# Crear OvS si no existe
+# ==========================================================
+# 1️⃣ Crear el bridge si no existe
+# ==========================================================
 if ovs-vsctl br-exists "$NOMBRE_OVS"; then
   echo "[INFO] El bridge $NOMBRE_OVS ya existe."
 else
@@ -31,7 +33,13 @@ else
   ovs-vsctl add-br "$NOMBRE_OVS"
 fi
 
-# Agregar puertos físicos (trunk)
+# 🔹 Asegurar que el bridge esté activo antes de seguir
+ip link set "$NOMBRE_OVS" up
+echo "[OK] Bridge $NOMBRE_OVS levantado correctamente."
+
+# ==========================================================
+# 2️⃣ Agregar interfaces físicas como puertos trunk
+# ==========================================================
 for P in "${PUERTOS[@]}"; do
   if ip link show "$P" >/dev/null 2>&1; then
     echo "[INFO] Agregando puerto $P al bridge $NOMBRE_OVS..."
@@ -44,7 +52,9 @@ for P in "${PUERTOS[@]}"; do
   fi
 done
 
-# Crear gateways por VLAN (para salida de cada VLAN)
+# ==========================================================
+# 3️⃣ Crear gateways para VLANs (100, 200, 300)
+# ==========================================================
 for VLAN in 100 200 300; do
   VLAN_IF="vlan${VLAN}"
   if ! ip link show "$VLAN_IF" >/dev/null 2>&1; then
@@ -54,7 +64,9 @@ for VLAN in 100 200 300; do
   ip link set "$VLAN_IF" up
 done
 
-# Configurar NAT usando ens8 (interfaz de salida a Internet)
+# ==========================================================
+#  Configurar NAT de salida por ens8
+# ==========================================================
 INET_IF="ens8"
 if ip link show "$INET_IF" >/dev/null 2>&1; then
   echo "[INFO] Habilitando NAT sobre $INET_IF..."
@@ -64,6 +76,10 @@ else
   echo "[WARN] No se encontró la interfaz $INET_IF. NAT no configurado."
 fi
 
+# ==========================================================
+# ✅ Resumen final
+# ==========================================================
 echo "=== OpenFlow Switch ($NOMBRE_OVS) configurado correctamente ==="
 ovs-vsctl show
+
 
