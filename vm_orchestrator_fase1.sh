@@ -20,29 +20,27 @@ OFS_HOST="10.0.10.5"
 
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
 
+# 1) Inicializar Workers
 echo "==> Inicializando Workers..."
-sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" $USER@$WORKER1_HOST "cd $WORKDIR && sudo ./init_worker.sh br-int ens4"
-sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" $USER@$WORKER2_HOST "cd $WORKDIR && sudo ./init_worker.sh br-int ens4"
-sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" $USER@$WORKER3_HOST "cd $WORKDIR && sudo ./init_worker.sh br-int ens4"
+sshpass -p "$PASS" ssh $SSH_OPTS $USER@$WORKER1_HOST "echo $PASS | sudo -S ./init_worker.sh br-int ens4"
+sshpass -p "$PASS" ssh $SSH_OPTS $USER@$WORKER2_HOST "echo $PASS | sudo -S ./init_worker.sh br-int ens4"
+sshpass -p "$PASS" ssh $SSH_OPTS $USER@$WORKER3_HOST "echo $PASS | sudo -S ./init_worker.sh br-int ens4"
 
+# 2) Inicializar OFS
 echo "==> Inicializando OFS..."
-sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" $USER@$OFS_HOST "cd $WORKDIR && sudo ./init_ofs.sh br-ofs ens5 ens6 ens7 ens8"
+sshpass -p "$PASS" ssh $SSH_OPTS $USER@$OFS_HOST "echo $PASS | sudo -S ./init_ofs.sh br-ofs ens5 ens6 ens7 ens8"
 
+# 3) Crear VMs
 echo "==> Creando VMs..."
-# Worker 1
-sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" $USER@$WORKER1_HOST "cd $WORKDIR && sudo ./vm_create.sh vm1 br-int 100 5901"
-sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" $USER@$WORKER1_HOST "cd $WORKDIR && sudo ./vm_create.sh vm2 br-int 200 5902"
-sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" $USER@$WORKER1_HOST "cd $WORKDIR && sudo ./vm_create.sh vm3 br-int 300 5903"
-
-# Worker 2
-sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" $USER@$WORKER2_HOST "cd $WORKDIR && sudo ./vm_create.sh vm1 br-int 100 5904"
-sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" $USER@$WORKER2_HOST "cd $WORKDIR && sudo ./vm_create.sh vm2 br-int 200 5905"
-sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" $USER@$WORKER2_HOST "cd $WORKDIR && sudo ./vm_create.sh vm3 br-int 300 5906"
-
-# Worker 3
-sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" $USER@$WORKER3_HOST "cd $WORKDIR && sudo ./vm_create.sh vm1 br-int 100 5907"
-sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" $USER@$WORKER3_HOST "cd $WORKDIR && sudo ./vm_create.sh vm2 br-int 200 5908"
-sshpass -p "$PASS" ssh "${SSH_OPTS[@]}" $USER@$WORKER3_HOST "cd $WORKDIR && sudo ./vm_create.sh vm3 br-int 300 5909"
+sshpass -p "$PASS" ssh $SSH_OPTS $USER@$WORKER1_HOST "echo $PASS | sudo -S ./vm_create.sh vm1 br-int 100 5901"
+sshpass -p "$PASS" ssh $SSH_OPTS $USER@$WORKER1_HOST "echo $PASS | sudo -S ./vm_create.sh vm2 br-int 200 5902"
+sshpass -p "$PASS" ssh $SSH_OPTS $USER@$WORKER1_HOST "echo $PASS | sudo -S ./vm_create.sh vm3 br-int 300 5903"
+sshpass -p "$PASS" ssh $SSH_OPTS $USER@$WORKER2_HOST "echo $PASS | sudo -S ./vm_create.sh vm1 br-int 100 5904"
+sshpass -p "$PASS" ssh $SSH_OPTS $USER@$WORKER2_HOST "echo $PASS | sudo -S ./vm_create.sh vm2 br-int 200 5905"
+sshpass -p "$PASS" ssh $SSH_OPTS $USER@$WORKER2_HOST "echo $PASS | sudo -S ./vm_create.sh vm3 br-int 300 5906"
+sshpass -p "$PASS" ssh $SSH_OPTS $USER@$WORKER3_HOST "echo $PASS | sudo -S ./vm_create.sh vm1 br-int 100 5907"
+sshpass -p "$PASS" ssh $SSH_OPTS $USER@$WORKER3_HOST "echo $PASS | sudo -S ./vm_create.sh vm2 br-int 200 5908"
+sshpass -p "$PASS" ssh $SSH_OPTS $USER@$WORKER3_HOST "echo $PASS | sudo -S ./vm_create.sh vm3 br-int 300 5909"
 
 echo "==> Fase 1 del orquestador desplegada correctamente."
 
