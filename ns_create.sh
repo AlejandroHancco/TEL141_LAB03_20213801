@@ -28,28 +28,39 @@ GATEWAY="$5"
 
 VETH_NS="v${VLAN_ID}-ns"
 VETH_OVS="v${VLAN_ID}-ovs"
+PID_FILE="/tmp/ns_${NS_NAME}/dnsmasq.pid"
+
+# --- Eliminar procesos dnsmasq viejos ---
+if [[ -f "$PID_FILE" ]]; then
+    OLD_PID=$(cat "$PID_FILE")
+    if kill -0 "$OLD_PID" 2>/dev/null; then
+        echo "[INFO] Matando dnsmasq anterior ($OLD_PID)..."
+        kill -9 "$OLD_PID"
+    fi
+fi
 
 # --- Crear namespace si no existe ---
 if ip netns list | grep -qw "$NS_NAME"; then
     echo "[INFO] Namespace $NS_NAME ya existe, se reutiliza."
 else
     ip netns add "$NS_NAME"
-    echo "[OK] Namespace $NS_NAME creado."
+    echo "[INFO] Namespace $NS_NAME creado."
 fi
 
 # --- Crear par veth si no existe ---
-if ip link show "$VETH_NS" >/dev/null 2>&1 || ip link show "$VETH_OVS" >/dev/null 2>&1; then
+if ip link show "$VETH_NS" >/dev/null 2>&1 && ip link show "$VETH_OVS" >/dev/null 2>&1; then
     echo "[INFO] Las interfaces $VETH_NS/$VETH_OVS ya existen, se reutilizan."
 else
     ip link add "$VETH_NS" type veth peer name "$VETH_OVS"
-    echo "[OK] Par veth $VETH_NS <-> $VETH_OVS creado."
+    echo "[INFO] Interfaces $VETH_NS/$VETH_OVS creadas."
 fi
 
-# --- Mover VETH al namespace ---
-ip link set "$VETH_NS" netns "$NS_NAME" 2>/dev/null || true
+# --- Asignar veth al namespace ---
+ip link set "$VETH_NS" netns "$NS_NAME" || true
 
 # --- Configurar interfaz en namespace ---
-ip -n "$NS_NAME" addr add "${GATEWAY}/24" dev "$VETH_NS" 2>/dev/null || true
+ip -n "$NS_NAME" addr flush dev "$VETH_NS"
+ip -n "$NS_NAME" addr add "${GATEWAY}/24" dev "$VETH_NS"
 ip -n "$NS_NAME" link set "$VETH_NS" up
 ip -n "$NS_NAME" link set lo up
 
@@ -58,25 +69,17 @@ ovs-vsctl --may-exist add-port "$OVS_BR" "$VETH_OVS" tag="$VLAN_ID"
 ip link set "$VETH_OVS" up
 
 # --- Configurar DHCP con dnsmasq ---
-mkdir -p /tmp/ns_${NS_NAME}
-# Separar rango DHCP por guion y convertir a coma
-IFS='-' read -r DHCP_START DHCP_END <<< "$DHCP_RANGE"
-
-cat > /tmp/ns_${NS_NAME}/dnsmasq.conf <<EOF
+mkdir -p "/tmp/ns_${NS_NAME}"
+cat > "/tmp/ns_${NS_NAME}/dnsmasq.conf" <<EOF
 interface=$VETH_NS
-dhcp-range=$DHCP_START,$DHCP_END,12h
+dhcp-range=$DHCP_RANGE,12h
 dhcp-option=3,$GATEWAY
 bind-interfaces
 EOF
-# Ejecutar dnsmasq en el namespace
 
-if ! ip netns exec "$NS_NAME" pgrep -f "dnsmasq.*$VETH_NS" >/dev/null 2>&1; then
-    ip netns exec "$NS_NAME" dnsmasq --conf-file=/tmp/ns_${NS_NAME}/dnsmasq.conf --pid-file=/tmp/ns_${NS_NAME}/dnsmasq.pid
-    echo "[OK] dnsmasq iniciado en $NS_NAME"
-else
-    echo "[INFO] dnsmasq ya está corriendo en $NS_NAME"
-fi
+# Lanzar dnsmasq en el namespace
+ip netns exec "$NS_NAME" dnsmasq --conf-file="/tmp/ns_${NS_NAME}/dnsmasq.conf" --pid-file="$PID_FILE"
 
+echo "[OK] dnsmasq iniciado en $NS_NAME"
 echo "=== Namespace $NS_NAME creado con VLAN $VLAN_ID ==="
 ip netns list
-
