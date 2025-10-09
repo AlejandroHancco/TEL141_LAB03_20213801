@@ -2,8 +2,6 @@
 # ==========================================================
 # Script: ns_create.sh
 # Propósito: Crear un Network Namespace con DHCP y Gateway
-# Uso: sudo ./ns_create.sh <NombreNS> <NombreOvS> <VLAN_ID> <RangoDHCP> <Gateway>
-# Ejemplo: sudo ./ns_create.sh vlan100 br-int 100 "192.168.100.10-192.168.100.50" 192.168.100.1
 # ==========================================================
 
 set -euo pipefail
@@ -69,12 +67,17 @@ if [[ -f "$DNSMASQ_PID_FILE" ]] && kill -0 $(cat "$DNSMASQ_PID_FILE") 2>/dev/nul
     kill -9 $(cat "$DNSMASQ_PID_FILE") || true
 fi
 
-# Configurar archivo dnsmasq
+# --- Preparar rango DHCP ---
+START_IP=$(echo $DHCP_RANGE | cut -d'-' -f1)
+END_IP=$(echo $DHCP_RANGE | cut -d'-' -f2)
+
+# --- Crear archivo de configuración dnsmasq ---
 cat > "$TMP_DIR/dnsmasq.conf" <<EOF
 interface=$VETH_NS
-dhcp-range=$DHCP_RANGE,12h
+dhcp-range=$START_IP,$END_IP,12h
 dhcp-option=3,$GATEWAY
 bind-interfaces
+
 EOF
 
 # Lanzar dnsmasq en el namespace
@@ -83,4 +86,3 @@ ip netns exec "$NS_NAME" dnsmasq --conf-file="$TMP_DIR/dnsmasq.conf" --pid-file=
 echo "[OK] dnsmasq iniciado en $NS_NAME"
 echo "=== Namespace $NS_NAME creado con VLAN $VLAN_ID ==="
 ip netns list
-
